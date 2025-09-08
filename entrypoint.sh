@@ -1,6 +1,7 @@
 #!/bin/sh
+set -e
 
-pkill -9 nginx
+pkill -9 nginx || true
 /usr/sbin/nginx
 # Start the second process
 /usr/bin/python3 /opt/dns.py --ip ENV --whitelist /opt/domains
