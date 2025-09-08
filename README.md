@@ -1,28 +1,68 @@
-# Build Your Own Shecan
+# Smart DNS
 
-`Shecan` is an anti-sanction service offered by a group of researchers in Iran. It allows you to use a different DNS server and have a transparent proxy for the whitelisted domains. 
+A minimal implementation of a Shecan-like service. It combines a lightweight DNS server written in Python with an Nginx based transparent proxy. Whitelisted domains resolve to your public IP while all other lookups are resolved normally.
 
-Since Security and Privacy audits have no place in Iran, and `Shecan` obviously hasn't been through proper vetting, I decided to re-engineer something similar to it for personal use.
+## Repository Structure
 
-# Requirements
+| File | Description |
+|------|-------------|
+| `dns.py` | DNS server using [dnslib](https://github.com/paulc/dnslib). It serves a fixed IP for domains listed in the whitelist and falls back to real DNS resolution for others. |
+| `domains` | Default whitelist. Borrowed from [fod](https://github.com/freedomofdevelopers/fod). |
+| `nginx.conf` | Nginx configuration that redirects HTTP to HTTPS and forwards TCP traffic on port `443` based on SNI. |
+| `entrypoint.sh` | Start script that launches Nginx and the DNS server. |
+| `Dockerfile` | Build instructions for the container image. |
 
-- Docker/podman(recommended)
+## Requirements
 
-# Proxied Domains
+- Docker/Podman (recommended)
+- Python 3 with `dnslib` if running the DNS server outside of a container
 
-- Included in `domains` file inside the repository. "borrowed" from [fod](https://github.com/freedomofdevelopers/fod)
+## Usage
 
-# How to Use
+1. Ensure ports **53/udp**, **80**, and **443** are free. Disable `systemd-resolved` if necessary.
+2. Build the image (optional if using the published one):
 
-- make sure ports 80, 443 and 53 are not used in your system (probably a good idea to disable `systemd-resolvd` service)
-- run the command in your server (remember to replace YOUR_PUBLIC_IP with you public facing IP address)
+   ```bash
+   docker build -t smart-dns .
+   ```
 
-`docker run -d -p 53:53/udp -p 443:443 -p 80:80 --net=host -e PUB_IP=YOUR_PUBLIC_IP --name some-private-shecan chosomeister/private-shecan:latest`
+3. Run the container, replacing `YOUR_PUBLIC_IP` with the address you want whitelisted domains to resolve to:
 
-# FAQ
+   ```bash
+   docker run -d --net=host -p 53:53/udp -p 80:80 -p 443:443 \
+     -e PUB_IP=YOUR_PUBLIC_IP --name smart-dns smart-dns:latest
+   ```
 
-## Why all these ports and also --net=host
+### Environment Variables
 
-Port 53 is used to recieve DNS and act as a DNS server. port 80 and 443 recieve HTTP traffic and handle the proxy side.
+- `PUB_IP`: IP address returned for whitelisted domains.
+- `DNS_ALLOW_ALL=YES`: Ignore the whitelist and respond with `PUB_IP` for every domain.
 
-`--net=host` is needed because your Container engine will use NAT to push traffic to 443, and since your original IP will be masked from Nginx, it won't be able to handle proxy requests. 
+### Running the DNS server manually
+
+```bash
+python3 dns.py --ip ENV --whitelist domains --port 53
+```
+
+Use `--ip ENV` to read the IP from the `PUB_IP` environment variable, or supply the IP directly. Set `--whitelist ALL` (or `DNS_ALLOW_ALL=YES`) to allow every domain.
+
+### Testing
+
+Verify functionality with `dig`:
+
+```bash
+dig @127.0.0.1 -p 53 fodev.org +short   # returns PUB_IP for whitelisted domain
+dig @127.0.0.1 -p 53 google.com +short  # returns real IP for others
+```
+
+## FAQ
+
+### Why ports 53, 80, 443 and `--net=host`?
+
+- Port 53 handles DNS queries.
+- Ports 80 and 443 receive HTTP/HTTPS traffic for the transparent proxy.
+- `--net=host` avoids NAT so Nginx can see the original client IP and process SNI correctly.
+
+## Disclaimer
+
+This project is for educational use. Review the code and configuration before exposing it to untrusted networks.
